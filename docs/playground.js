@@ -108,6 +108,7 @@ function runToy({environment, noise, movement, information, generations, seed}) 
       }
       a.p = bestPatch;
     }
+    const populationAtCapture = agents.length;
     const caps = new Float64Array(PATCHES);
     const individualCap = agents.map(a => .35 + 1.1 * a.collector + .25 * a.cooperation);
     for (let i = 0; i < agents.length; i++) caps[agents[i].p] += individualCap[i];
@@ -149,7 +150,7 @@ function runToy({environment, noise, movement, information, generations, seed}) 
       next.length = 500;
     }
     agents = next;
-    history.push({generation:t+1,population:agents.length,total:totalCapture,per:totalCapture / Math.max(1,agents.length),agency:agents.length ? agents.reduce((s,a)=>s+a.sensing+a.processing+a.prediction+a.planning+a.action,0)/(agents.length*5) : 0});
+    history.push({generation:t+1,population:agents.length,total:totalCapture,per:totalCapture / Math.max(1,populationAtCapture),agency:agents.length ? agents.reduce((s,a)=>s+a.sensing+a.processing+a.prediction+a.planning+a.action,0)/(agents.length*5) : 0});
     if (!agents.length) break;
   }
   return {agents,history,field:lastField};
