@@ -46,7 +46,8 @@ LATE_START = 200
 METRICS = [
     "mean_gross_energy_units","mean_net_energy_units","biotic_power_harnessed_TW",
     "biotic_power_per_entity_GW","population","occupied_patch_fraction",
-    "gross_energy_gini","mean_mobility_fraction","mean_information_composite","mean_action",
+    "gross_energy_gini","mean_mobility_fraction","adult_move_opportunity_fraction",
+    "mean_movement_field_gain_W_m2","mean_information_composite","mean_action",
 ]
 
 def make_config(noise: float, stage: str) -> Config:
@@ -78,6 +79,7 @@ def pad_extinct_run(frame: pd.DataFrame, scenario_key: str, replicate: int, end_
             "total_biotic_harvest_units": 0.0, "occupied_patch_fraction": 0.0,
             "gross_energy_gini": np.nan, "mean_mobility_fraction": 0.0,
             "mean_information_composite": np.nan, "mean_action": np.nan,
+            "adult_move_opportunity_fraction": 0.0, "mean_movement_field_gain_W_m2": np.nan,
             "biotic_power_per_entity_GW": np.nan,
         })
         rows.append(row)
@@ -98,7 +100,8 @@ def paired_effects(late: pd.DataFrame) -> pd.DataFrame:
     metrics = [
         "mean_gross_energy_units","mean_net_energy_units","biotic_power_harnessed_TW",
         "biotic_power_per_entity_GW","population","occupied_patch_fraction",
-        "gross_energy_gini","mean_mobility_fraction",
+        "gross_energy_gini","mean_mobility_fraction","adult_move_opportunity_fraction",
+        "mean_movement_field_gain_W_m2",
     ]
     for stage in ("fixed_mechanism","evolutionary"):
         for env in ENVIRONMENTS:
@@ -194,6 +197,15 @@ def main():
     data = pd.concat(all_frames, ignore_index=True)
     data.to_csv(OUT/"timeseries.csv",index=False)
     late = late_window_means(data)
+    # A/B Stage-1 validity checks: same realized movement frequency and same
+    # movement-opportunity frequency for every paired replicate.
+    fixed = late[late.stage=="fixed_mechanism"]
+    for metric in ["mean_mobility_fraction","adult_move_opportunity_fraction"]:
+        check = fixed.pivot(index=["environment_label","noise_level","replicate"],columns="treatment",values=metric)
+        if not np.allclose(check["informed_directed"],check["uninformed_random"],atol=1e-12,rtol=0):
+            raise RuntimeError(f"Stage-1 matched movement validation failed for {metric}")
+    if not np.allclose(fixed[fixed.treatment.isin(["informed_stationary","uninformed_stationary"])]["mean_mobility_fraction"],0.0,atol=1e-12):
+        raise RuntimeError("Stationary Stage-1 arms unexpectedly moved")
     late.to_csv(OUT/"replicate_late_window.csv",index=False)
     summary = late.groupby(["stage","environment_label","noise_level","treatment"])[
         [m for m in METRICS if m in late.columns] + ["final_population"]
@@ -230,11 +242,11 @@ def main():
       "initial_population":INITIAL_POPULATION,"environments":list(ENVIRONMENTS),
       "signal_noise_multipliers":NOISE_LEVELS,"treatments":TREATMENTS,
       "design":{
-        "stage_1":"Fixed population, no mutation/reproduction; traits frozen at previous canonical run's late-window mean phenotype. Informed and random movers share the same per-entity movement-gate RNG and fixed movement probability. Albedo and infrastructure feedback disabled.",
+        "stage_1":"Fixed population, no mutation/reproduction; traits frozen at previous canonical run's late-window mean phenotype. Informed and random movers share the same per-entity movement-gate RNG and fixed movement probability; the current patch is excluded from both destination sets so realized movement frequency is exactly matched. The runner asserts equality of realized movement fractions and opportunity fractions for every paired replicate. Albedo and infrastructure feedback disabled.",
         "stage_2":"Evolutionary four-treatment factorial. Information traits (sensing, processing, prediction, planning) and adult mobility trait (action) are independently enabled. Directed movers navigate using information; uninformed movers move randomly. Adult mobility is absent in stationary arms.",
         "offspring_dispersal":"Set to a common fixed baseline probability (0.035) in every Stage-2 treatment; no action-dependent offspring dispersal.",
         "fitness":"Survival, reproduction and parent selection remain based on individual net energy; no entropy term is added.",
-        "primary_stage_1_contrast":"informed_directed minus uninformed_random: same starting state, same adult movement opportunity and same movement cost; only destination information differs.",
+        "primary_stage_1_contrast":"informed_directed minus uninformed_random: same starting state, exactly matched realized adult movement frequency, same movement cost; only destination information differs. Current patch is excluded from both destination sets in Stage 1.",
         "primary_stage_2_contrast":"informed_directed minus uninformed_random: both information and mobility can evolve; estimates the evolutionary consequence of the factorial treatment, not a fixed-rate navigation effect.",
       },
       "interpretation_guardrail":"Biological capture/throughput is not planetary entropy production. This experiment does not establish that intelligence is inevitable or that evolution maximizes global dissipation.",
@@ -248,7 +260,7 @@ def main():
       "- Two environments (strong predictable hotspots; volatile shifting hotspots).",
       "- Three signal/noise levels (0.10, 0.50, 1.50 times the spatial standard deviation).",
       "- Four treatments: informed directed movement, uninformed random movement, information without adult movement, and neither.",
-      "- Stage 1 holds population size and traits fixed; informed and random movers receive exactly matched adult movement opportunities and costs.",
+      "- Stage 1 holds population size and traits fixed; informed and random movers receive exactly matched adult movement opportunities, realized movement frequency and costs. The current patch is excluded from both destination sets in this stage."
       "- Stage 2 allows information traits and the adult mobility trait to evolve independently. Offspring dispersal is held at the same baseline probability in every treatment.", "",
       "## What the contrasts mean", "",
       "- Informed directed minus uninformed random: the value of information for choosing destinations.",
