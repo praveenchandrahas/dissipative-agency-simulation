@@ -365,6 +365,7 @@ def run_one(
     evolutionary: bool = True,
     initial_traits: np.ndarray | None = None,
     initial_locations: np.ndarray | None = None,
+    navigation_policy: str = "irradiance_only",
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     scenario = SCENARIOS[scenario_key]
     cognition = bool(scenario["cognition_enabled"])
@@ -375,6 +376,9 @@ def run_one(
         raise ValueError("mobility_mode must be directed, random, or stationary")
     if mobility_mode == "directed" and not information_enabled:
         raise ValueError("directed mobility requires information_enabled=True")
+    valid_navigation_policies = {"irradiance_only", "density_aware", "expected_payoff"}
+    if navigation_policy not in valid_navigation_policies:
+        raise ValueError(f"navigation_policy must be one of {sorted(valid_navigation_policies)}")
     if fixed_move_probability is not None and not (0.0 <= fixed_move_probability <= 1.0):
         raise ValueError("fixed_move_probability must be between zero and one")
     scenario_index = list(SCENARIOS).index(scenario_key)
@@ -449,13 +453,11 @@ def run_one(
         movement_gain = np.zeros(len(locations), dtype=float)
         if len(traits) and mobility_mode != "stationary":
             all_candidates = neighbours[locations]
-            # In Stage 1 (fixed_move_probability supplied), remove the current
-            # patch so every movement gate produces an actual move in both
-            # informed and random treatments. Stage 2 retains the stay option.
-            if fixed_move_probability is not None:
-                cand = all_candidates[:, [0,1,2,3,5,6,7,8]]
-            else:
-                cand = all_candidates
+            # Every policy chooses among the same eight adjacent patches.
+            # Excluding the current patch ensures that a movement opportunity
+            # always becomes an actual move, so policy comparisons have matched
+            # movement rates whenever their movement gates are matched.
+            cand = all_candidates[:, [0,1,2,3,5,6,7,8]]
             current_field = flux_now * (1.0 - base_albedo)
             if mobility_mode == "directed":
                 sensing = traits[:, TRAIT_INDEX["sensing"]]
@@ -474,7 +476,121 @@ def run_one(
                 current_obs = current_field[cand] + decision_rng.normal(0.0, obs_sigma[:, None], size=cand.shape)
                 future_obs = forecast_field[cand] + decision_rng.normal(0.0, pred_sigma[:, None], size=cand.shape)
                 future_weight = config.planning_horizon_weight * planning * prediction
-                scores = (1.0 - future_weight[:, None]) * current_obs + future_weight[:, None] * future_obs
+
+                if navigation_policy == "irradiance_only":
+                    scores = (1.0 - future_weight[:, None]) * current_obs + future_weight[:, None] * future_obs
+
+                elif navigation_policy == "density_aware":
+                    # A noisy local occupancy estimate is used to discount bright
+                    # destinations where many competitors already share the pool.
+                    local_count_grid = np.bincount(locations, minlength=n_cells).astype(float)
+                    density_sigma = (
+                        config.signal_noise_multiplier
+                        * max(float(np.std(local_count_grid)), 0.1)
+                        * (1.0 - sensing * processing) + 0.05
+                    )
+                    perceived_count = np.maximum(
+                        0.0,
+                        local_count_grid[cand]
+                        + decision_rng.normal(0.0, density_sigma[:, None], size=cand.shape),
+                    )
+                    density_scale = max(float(np.mean(local_count_grid)), 1.0)
+                    crowding_penalty = 1.0 + perceived_count / density_scale
+                    scores = (
+                        (1.0 - future_weight[:, None]) * current_obs
+                        + future_weight[:, None] * future_obs
+                    ) / crowding_penalty
+
+                else:  # expected_payoff
+                    # Estimate the model's own finite-pool, per-agent gross-energy
+                    # payoff at each candidate patch. Residents are counted before
+                    # simultaneous moves; the focal agent is then added to each
+                    # candidate. This is a one-step expected-payoff approximation,
+                    # not a full multi-agent equilibrium calculation.
+                    resident_count = np.bincount(locations, minlength=n_cells).astype(float)
+                    resident_coop_sum = np.bincount(
+                        locations, weights=traits[:, TRAIT_INDEX["cooperation"]], minlength=n_cells
+                    )
+                    resident_coop_mean = np.divide(
+                        resident_coop_sum, resident_count,
+                        out=np.zeros_like(resident_coop_sum), where=resident_count > 0
+                    )
+                    collector_area_all = 0.18 + 1.55 * traits[:, TRAIT_INDEX["collector"]]
+                    local_coop_all = resident_coop_mean[locations]
+                    resident_tech_multiplier = (
+                        1.0 + config.technology_capacity_gain
+                        * traits[:, TRAIT_INDEX["technology"]] * local_coop_all
+                    )
+                    resident_coop_multiplier = (
+                        1.0 + config.cooperation_capacity_gain
+                        * traits[:, TRAIT_INDEX["cooperation"]] * local_coop_all
+                    )
+                    resident_infra_multiplier = 1.0 + (
+                        config.infrastructure_capacity_gain * infrastructure[locations]
+                    )
+                    resident_capacity = np.clip(
+                        collector_area_all * resident_tech_multiplier
+                        * resident_coop_multiplier * resident_infra_multiplier, 0.02, 8.0
+                    )
+                    resident_capacity_grid = np.bincount(
+                        locations, weights=resident_capacity, minlength=n_cells
+                    )
+                    resident_area_grid = np.bincount(
+                        locations, weights=collector_area_all, minlength=n_cells
+                    )
+                    candidate_count = resident_count[cand] + 1.0
+                    candidate_coop_mean = (
+                        resident_coop_sum[cand]
+                        + traits[:, TRAIT_INDEX["cooperation"]][:, None]
+                    ) / candidate_count
+                    candidate_capacity = collector_area_all[:, None] * (
+                        1.0 + config.technology_capacity_gain
+                        * traits[:, TRAIT_INDEX["technology"]][:, None] * candidate_coop_mean
+                    ) * (
+                        1.0 + config.cooperation_capacity_gain
+                        * traits[:, TRAIT_INDEX["cooperation"]][:, None] * candidate_coop_mean
+                    ) * (
+                        1.0 + config.infrastructure_capacity_gain * infrastructure[cand]
+                    )
+                    candidate_capacity = np.clip(candidate_capacity, 0.02, 8.0)
+                    total_candidate_capacity = resident_capacity_grid[cand] + candidate_capacity
+                    total_candidate_area = resident_area_grid[cand] + collector_area_all[:, None]
+                    predicted_cover = 1.0 - np.exp(-config.cover_sensitivity * total_candidate_area)
+                    predicted_albedo = np.clip(
+                        base_albedo[cand]
+                        - config.max_biotic_albedo_reduction * predicted_cover,
+                        0.035, 0.90,
+                    )
+                    patch_area = world["patch_area"]
+                    base_pool_scale = (
+                        patch_area * config.generation_seconds
+                        * config.baseline_resource_efficiency / config.resource_unit_joules
+                    )
+
+                    def expected_agent_payoff(observed_net_field: np.ndarray) -> np.ndarray:
+                        # Convert the noisy net-absorbed-field observation back to
+                        # incident flux, then apply the candidate patch's estimated
+                        # post-arrival albedo and the model's finite-pool capture law.
+                        estimated_flux = observed_net_field / np.maximum(
+                            1.0 - base_albedo[cand], 1e-9
+                        )
+                        pool = (
+                            estimated_flux * (1.0 - predicted_albedo) * base_pool_scale
+                        )
+                        harvested = pool * (
+                            1.0 - np.exp(-config.capture_sensitivity * total_candidate_capacity)
+                        )
+                        return harvested * candidate_capacity / np.maximum(
+                            total_candidate_capacity, 1e-12
+                        )
+
+                    payoff_now = expected_agent_payoff(current_obs)
+                    payoff_future = expected_agent_payoff(future_obs)
+                    scores = (
+                        (1.0 - future_weight[:, None]) * payoff_now
+                        + future_weight[:, None] * payoff_future
+                    )
+
                 best = np.argmax(scores, axis=1)
                 proposed = cand[np.arange(len(locations)), best]
             else:
