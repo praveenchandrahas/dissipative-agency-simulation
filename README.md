@@ -10,6 +10,7 @@ The project operationalizes one part of the broader hypothesis: persistent free-
 
 - `entropy_agency_sim_v0_2.py` — main six-scenario simulation.
 - `entropy_agency_v0_2_albedo_sensitivity.py` — albedo-feedback-off sensitivity experiment.
+- `run_parameter_sweep.py` — reproducible multi-factor screening and bounded factorial parameter sweep.
 - `requirements.txt` — Python dependencies.
 - `MODEL.md` — model design, equations, assumptions and limitations.
 - `RESULTS.md` — interpretation of the recorded v0.2 exploratory run.
@@ -24,7 +25,7 @@ python -m pip install -r requirements.txt
 python entropy_agency_sim_v0_2.py --output-dir results
 ```
 
-Run the sensitivity experiment:
+Run the albedo-off sensitivity experiment:
 
 ```bash
 python entropy_agency_v0_2_albedo_sensitivity.py \
@@ -32,26 +33,78 @@ python entropy_agency_v0_2_albedo_sensitivity.py \
   --output-dir results/albedo-off
 ```
 
+## Parameter sweep
+
+The sweep varies eight factors:
+
+| Factor | Levels (low / nominal / high) | What changes |
+|---|---|---|
+| `spatial_contrast_scale` | 0.5 / 1.0 / 1.5 | Spatial contrast in local stellar irradiance |
+| `seasonal_amplitude_scale` | 0.5 / 1.0 / 1.5 | Predictable seasonal energy redistribution |
+| `weather_sigma_scale` | 0.5 / 1.0 / 1.5 | Stochastic weather volatility |
+| `stellar_flux_multiplier` | 0.8 / 1.0 / 1.2 | Total incoming stellar energy flux |
+| `cognitive_cost_multiplier` | 0.5 / 1.0 / 1.5 | Maintenance costs of sensing through action |
+| `mutation_sd` | 0.0175 / 0.035 / 0.07 | Heritable variation per generation |
+| `survival_gain` | 0.40 / 0.58 / 0.75 | Energy-dependent survival response |
+| `birth_rate_gain` | 0.08 / 0.16 / 0.24 | Energy-dependent reproduction response |
+
+### Screening design (recommended first)
+
+One-factor-at-a-time (OFAT) screening runs a baseline plus low and high values for every selected factor. With all eight factors this is 17 parameter cases. This estimates main effects efficiently, but **does not estimate interactions between factors**.
+
+```bash
+python run_parameter_sweep.py \
+  --design screening --factors all --scenarios all \
+  --generations 100 --replicates 2 --seed 20261116 \
+  --output-dir parameter_sweep_outputs
+```
+
+For a quick cognition-focused test:
+
+```bash
+python run_parameter_sweep.py \
+  --design screening \
+  --factors stellar_flux_multiplier,cognitive_cost_multiplier,spatial_contrast_scale \
+  --scenarios cognition_pair \
+  --generations 100 --replicates 3 \
+  --output-dir parameter_sweep_cognition
+```
+
+### Factorial design (interaction exploration)
+
+A 3-level full factorial estimates interactions, but is limited to four selected factors (up to 81 combinations):
+
+```bash
+python run_parameter_sweep.py \
+  --design factorial \
+  --factors stellar_flux_multiplier,cognitive_cost_multiplier,spatial_contrast_scale,mutation_sd \
+  --scenarios cognition_pair \
+  --generations 150 --replicates 4 \
+  --max-cases 81 --output-dir parameter_sweep_factorial
+```
+
+The runner reuses the base seed and replicate indices across parameter cases, helping align stochastic comparisons. Outputs include the exact case table, per-replicate final outcomes, grouped means and standard deviations, marginal effects, a figure and a run manifest.
+
+### Sweep output files
+
+- `parameter_cases.csv` — every parameter configuration.
+- `sweep_replicate_results.csv` — terminal metrics for each replicate and scenario.
+- `sweep_summary.csv` — means and standard deviations by case and scenario.
+- `sweep_effects.csv` — marginal changes from nominal parameter levels.
+- `parameter_sweep_effects.png` — visual summary of responses.
+- `sweep_manifest.json` — design, factors, levels, seed, run count and source commit.
+
 ## Run on GitHub Actions
 
-The repository has two workflows:
+The repository has three workflows:
 
-### Continuous integration
+- **CI** runs on pushes and pull requests. It compiles the simulation and sweep scripts, runs a small six-scenario test, then runs a miniature parameter sweep and validates both outputs.
+- **Run simulations** manually executes the six-scenario experiment and optional albedo-off sensitivity.
+- **Parameter sweep** manually executes screening or factorial designs.
 
-The **CI** workflow runs automatically on every push to `main` and every pull request targeting `main`. It installs the Python dependencies, compiles both scripts, executes a short six-scenario smoke run, and validates the generated data.
+To launch a sweep: open **Actions → Parameter sweep → Run workflow**. Choose the design, factors, scenarios, generations, replicates and seed. The default screening is 17 cases × 6 scenarios × 2 replicates = 204 scenario-replicate runs. The completed workflow page includes a summary; download the artifact for full CSV and plot outputs.
 
-### Full simulation runs
-
-1. Open the repository's **Actions** tab.
-2. Select **Run simulations**.
-3. Choose **Run workflow**.
-4. Set generations, replicates and seed. Keep the albedo-off sensitivity enabled for a matched sensitivity run.
-5. Open the completed workflow run. Its summary table is displayed on the run page.
-6. Download the `dissipative-agency-results-…` artifact for the CSV files, plots and run manifest.
-
-The manual workflow defaults to 220 generations and 6 independent replicates per scenario. It also runs the albedo-off sensitivity by default. Inputs are bounded to 1–500 generations and 1–12 replicates to keep execution within the hosted runner's limits.
-
-Simulation outputs are retained as GitHub Actions artifacts for 30 days. They are not automatically committed to `main`; each artifact contains a manifest recording the source commit, run ID, parameters and seed so that results can be traced and reproduced.
+Limits protect hosted-runner capacity: 1–500 generations, 1–8 replicates, at most 81 cases and 1,500 scenario-replicate runs. Factorial designs are restricted to four factors. Sweep artifacts are retained for 90 days and are not automatically committed to `main`.
 
 ## Scientific guardrails
 
@@ -59,13 +112,10 @@ Simulation outputs are retained as GitHub Actions artifacts for 30 days. They ar
 2. Biological chemical-energy throughput is kept separate from total planetary absorbed stellar power.
 3. The abiotic reference receives the same external irradiance history and base albedo as the biological run.
 4. The planetary radiative entropy estimate is a simplified global-mean blackbody diagnostic, not a complete calculation of planetary entropy production.
-5. The life-induced albedo feedback is a contestable model assumption. The albedo-off sensitivity experiment is included precisely because the headline planetary entropy difference depends on it.
+5. The life-induced albedo feedback is a contestable model assumption. The albedo-off sensitivity experiment is included because the planetary entropy difference depends on it.
 6. Behavioural payoffs are explicitly specified by the modeller. This version tests a candidate mechanism; it does not derive intelligence from first principles.
-
-## Status
-
-Version 0.2 is a baseline exploratory implementation. The next scientifically valuable steps are to derive agency from an explicit noisy information-and-control problem, add competing abiotic dissipation pathways, improve the planetary energy/entropy ledger, and run broad parameter sweeps before extending the model toward technological civilizations or Kardashev-scale energy use.
+7. Parameter sweeps identify model sensitivity, not real-world parameter values or a universal law. Screening and factorial designs answer different questions and should not be conflated.
 
 ## License
 
-No license has been selected for this standalone repository yet. Choose one in GitHub before inviting reuse or contributions.
+See [LICENSE](LICENSE).
