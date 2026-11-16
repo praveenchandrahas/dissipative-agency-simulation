@@ -1,0 +1,184 @@
+name: Run simulations
+
+run-name: "Simulation: ${{ inputs.generations }} generations × ${{ inputs.replicates }} replicates"
+
+on:
+  workflow_dispatch:
+    inputs:
+      generations:
+        description: "Generations per simulation (1–500)"
+        required: true
+        default: 220
+        type: number
+      replicates:
+        description: "Independent replicates per scenario (1–12)"
+        required: true
+        default: 6
+        type: number
+      seed:
+        description: "Random seed for reproducibility"
+        required: true
+        default: 20261116
+        type: number
+      run_albedo_sensitivity:
+        description: "Also run the albedo-feedback-off sensitivity experiment"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: simulation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  simulate:
+    name: Execute simulation suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      MPLBACKEND: Agg
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate run parameters
+        env:
+          GENERATIONS: ${{ inputs.generations }}
+          REPLICATES: ${{ inputs.replicates }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          python - <<'PY'
+          import os
+
+          generations = int(os.environ["GENERATIONS"])
+          replicates = int(os.environ["REPLICATES"])
+          seed = int(os.environ["SEED"])
+
+          if not 1 <= generations <= 500:
+              raise SystemExit("generations must be between 1 and 500")
+          if not 1 <= replicates <= 12:
+              raise SystemExit("replicates must be between 1 and 12")
+          if not 0 <= seed <= 2_147_483_647:
+              raise SystemExit("seed must be between 0 and 2147483647")
+          print(f"Parameters accepted: {generations=}, {replicates=}, {seed=}")
+          PY
+
+      - name: Run main six-scenario experiment
+        env:
+          GENERATIONS: ${{ inputs.generations }}
+          REPLICATES: ${{ inputs.replicates }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          python entropy_agency_sim_v0_2.py \
+            --generations "$GENERATIONS" \
+            --replicates "$REPLICATES" \
+            --seed "$SEED" \
+            --output-dir artifacts/main
+
+      - name: Run albedo-off sensitivity experiment
+        if: ${{ inputs.run_albedo_sensitivity }}
+        env:
+          GENERATIONS: ${{ inputs.generations }}
+          REPLICATES: ${{ inputs.replicates }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          python entropy_agency_v0_2_albedo_sensitivity.py \
+            --generations "$GENERATIONS" \
+            --replicates "$REPLICATES" \
+            --seed "$SEED" \
+            --output-dir artifacts/albedo-off
+
+      - name: Write run manifest
+        env:
+          GENERATIONS: ${{ inputs.generations }}
+          REPLICATES: ${{ inputs.replicates }}
+          SEED: ${{ inputs.seed }}
+          RUN_SENSITIVITY: ${{ inputs.run_albedo_sensitivity }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = {
+              "model": "dissipative-agency-simulation",
+              "version": "0.2",
+              "git_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "generations": int(os.environ["GENERATIONS"]),
+              "replicates": int(os.environ["REPLICATES"]),
+              "seed": int(os.environ["SEED"]),
+              "albedo_off_sensitivity_enabled": os.environ["RUN_SENSITIVITY"].lower() == "true",
+              "python": os.sys.version,
+          }
+          Path("artifacts/run-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
+      - name: Add results summary to workflow page
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import csv
+          from pathlib import Path
+
+          print("# Simulation run")
+          path = Path("artifacts/main/entropy_agency_v0_2_final_summary.csv")
+          if not path.exists():
+              print("\nMain simulation summary was not produced.")
+              raise SystemExit(0)
+
+          print("\n## Main experiment")
+          print("| Scenario | Population | Agency | Biotic throughput (TW) | Δ radiative entropy (%) |")
+          print("|---|---:|---:|---:|---:|")
+          with path.open(newline="") as f:
+              for row in csv.DictReader(f):
+                  print(
+                      f"| {row['scenario']} "
+                      f"| {float(row['final_population_mean']):.1f} "
+                      f"| {float(row['agency_mean']):.3f} "
+                      f"| {float(row['biotic_power_TW_mean']):.3f} "
+                      f"| {float(row['entropy_delta_percent_mean']):.3f} |"
+                  )
+
+          sensitivity = Path("artifacts/albedo-off/entropy_agency_v0_2_albedo_off_summary.csv")
+          if sensitivity.exists():
+              print("\n## Albedo-off sensitivity")
+              print("| Scenario | Population | Biotic throughput (TW) | Δ radiative entropy (%) |")
+              print("|---|---:|---:|---:|")
+              with sensitivity.open(newline="") as f:
+                  for row in csv.DictReader(f):
+                      print(
+                          f"| {row['scenario']} "
+                          f"| {float(row['final_population_mean']):.1f} "
+                          f"| {float(row['biotic_power_TW_mean']):.3f} "
+                          f"| {float(row['entropy_delta_percent_mean']):.3f} |"
+                      )
+          PY
+
+      - name: Upload simulation outputs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: dissipative-agency-results-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
