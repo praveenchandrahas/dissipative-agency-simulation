@@ -2,6 +2,7 @@
 """Two-stage information-versus-movement ablation on the no-direct-bonus v0.2 core."""
 from __future__ import annotations
 import json
+import argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -9,7 +10,6 @@ import matplotlib.pyplot as plt
 from entropy_agency_sim_v0_2 import Config, SCENARIOS, build_world, run_one
 
 OUT = Path("information_movement_results")
-OUT.mkdir(exist_ok=True)
 SEED = 20261119
 REPLICATES = 20
 GENERATIONS = 220
@@ -129,6 +129,15 @@ def paired_effects(late: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 def main():
+    global REPLICATES, GENERATIONS, INITIAL_POPULATION, OUT
+    parser = argparse.ArgumentParser(description="Two-stage information-versus-movement ablation")
+    parser.add_argument("--smoke", action="store_true", help="Run a short 1-replicate smoke test")
+    parser.add_argument("--output-dir", default=None)
+    args = parser.parse_args()
+    if args.smoke:
+        REPLICATES, GENERATIONS, INITIAL_POPULATION = 1, 12, 80
+    OUT = Path(args.output_dir or ("information_movement_smoke" if args.smoke else "information_movement_results"))
+    OUT.mkdir(exist_ok=True)
     world = build_world(Config())
     all_frames = []
     total_runs = 2 * len(ENVIRONMENTS) * len(NOISE_LEVELS) * len(TREATMENTS) * REPLICATES
