@@ -1,5 +1,8 @@
 # Dissipative Agency Simulation
 
+🌐 **Project website:** [Dissipative Agency — Energy, Life & Intelligence](https://praveenchandrahas.github.io/dissipative-agency-simulation/) · [Plain-language essay](https://praveenchandrahas.github.io/dissipative-agency-simulation/blog.html) · [Interactive simulation playground](https://praveenchandrahas.github.io/dissipative-agency-simulation/#playground)
+
+
 An exploratory spatial eco-evolutionary simulation investigating whether increasingly capable energy-harvesting structures—and, under some environmental conditions, information-processing and agentic behaviour—can emerge through ordinary survival and reproduction in a planet-scale energy landscape.
 
 The project operationalizes one part of the broader hypothesis: persistent free-energy gradients can support heritable structures that compete for access to usable energy; sensing, processing, prediction, planning and action may evolve when their harvesting benefits exceed their energetic costs.
