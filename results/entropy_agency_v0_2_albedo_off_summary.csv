@@ -1,0 +1,3 @@
+scenario_key,scenario,replicates,final_population_mean,agency_mean,biotic_power_TW_mean,biotic_power_per_entity_GW_mean,albedo_biotic_mean,albedo_abiotic_mean,entropy_delta_percent_mean
+strong_predictable_hotspots,"Strong, predictable hotspots",3,781.3333333333334,0.24499756836973816,31.036265383819,39.77101057926711,0.2977508140753949,0.2977508140753949,0.0
+strong_predictable_no_cognition,Strong hotspots / cognitive traits disabled,3,6977.0,0.0,120.87618530375802,17.348224785562802,0.2977508140753949,0.2977508140753949,0.0
