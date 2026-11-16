@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   smoke-test:
-    name: Compile and run a small simulation
+    name: Compile and run simulation tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       MPLBACKEND: Agg
       PYTHONUNBUFFERED: "1"
@@ -42,6 +42,7 @@ jobs:
         run: |
           python -m py_compile entropy_agency_sim_v0_2.py
           python -m py_compile entropy_agency_v0_2_albedo_sensitivity.py
+          python -m py_compile run_parameter_sweep.py
 
       - name: Run six-scenario smoke test
         run: |
@@ -51,7 +52,18 @@ jobs:
             --seed 123 \
             --output-dir ci-smoke-output
 
-      - name: Validate smoke-test outputs
+      - name: Run parameter-sweep smoke test
+        run: |
+          python run_parameter_sweep.py \
+            --design screening \
+            --factors stellar_flux_multiplier,cognitive_cost_multiplier \
+            --scenarios cognition_pair \
+            --generations 2 \
+            --replicates 1 \
+            --seed 123 \
+            --output-dir ci-sweep-output
+
+      - name: Validate simulation and sweep outputs
         run: |
           python - <<'PY'
           import json
@@ -81,7 +93,16 @@ jobs:
           for column in numeric_columns:
               assert np.isfinite(timeseries[column]).all(), f"Non-finite values in {column}"
 
-          print(f"Validated {len(timeseries)} time-series rows across six scenarios.")
-          print("Summary rows:", len(summary))
-          print("Cognitive ablation rows:", len(ablation))
+          sweep = Path("ci-sweep-output")
+          cases = pd.read_csv(sweep / "parameter_cases.csv")
+          results = pd.read_csv(sweep / "sweep_replicate_results.csv")
+          effects = pd.read_csv(sweep / "sweep_effects.csv")
+          manifest = json.loads((sweep / "sweep_manifest.json").read_text())
+          assert len(cases) == 5, f"Expected baseline plus four perturbations, got {len(cases)}"
+          assert len(results) == 10, f"Expected 5 cases × 2 scenarios × 1 replicate, got {len(results)}"
+          assert not effects.empty, "Sweep effects table is empty"
+          assert manifest["design"] == "screening"
+
+          print(f"Validated {len(timeseries)} ordinary simulation rows.")
+          print(f"Validated {len(cases)} sweep cases and {len(results)} sweep runs.")
           PY
