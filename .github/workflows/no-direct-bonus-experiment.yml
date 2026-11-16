@@ -1,0 +1,25 @@
+name: No-direct-bonus signal-noise experiment
+on:
+  push:
+    branches:
+      - experiment/no-direct-bonus
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip numpy pandas matplotlib
+      - name: Run canonical intervention experiment
+        run: python run_no_direct_bonus_experiment.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: no-direct-bonus-results
+          path: no_direct_bonus_results/
+          retention-days: 90

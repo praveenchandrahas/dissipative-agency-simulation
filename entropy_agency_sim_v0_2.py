@@ -101,6 +101,7 @@ class Config:
     # Behaviour / imperfect information
     sensing_noise: float = 0.42
     prediction_noise: float = 0.48
+    signal_noise_multiplier: float = 1.0  # scales sensory/prediction noise relative to field SD
     planning_horizon_weight: float = 0.70
     baseline_move_probability: float = 0.025
 
@@ -364,7 +365,9 @@ def run_one(
     # Separate random streams ensure that a cognition-enabled run and its
     # disabled control receive the same weather/irradiance history.
     env_rng = np.random.default_rng(config.seed + 100_003 * replicate + 7_919 * paired_environment_group)
-    rng = np.random.default_rng(config.seed + 100_003 * replicate + 1_009 * scenario_index)
+    # Matched cognitive/no-cognition treatments share the same initial population
+    # draw and stochastic stream; only the cognition constraint differs.
+    rng = np.random.default_rng(config.seed + 100_003 * replicate + 1_009 * paired_environment_group)
     traits, locations = initialize_population(rng, config, world, cognition)
     n_cells = world["cells"]
     base_albedo = world["base_albedo"]
@@ -405,8 +408,12 @@ def run_one(
             action = traits[:, TRAIT_INDEX["action"]]
             current_field = flux_now * (1.0 - base_albedo)
             forecast_field = flux_forecast * (1.0 - base_albedo)
-            obs_sigma = config.sensing_noise * (1.0 - sensing * processing) + 0.012
-            pred_sigma = config.prediction_noise * (1.0 - prediction * processing) + 0.012
+            # Noise is expressed relative to the spatial signal scale. This avoids
+            # effectively perfect sensing caused by sub-W/m^2 absolute noise.
+            obs_sigma = (config.signal_noise_multiplier * config.sensing_noise
+                         * float(np.std(current_field)) * (1.0 - sensing * processing) + 0.012)
+            pred_sigma = (config.signal_noise_multiplier * config.prediction_noise
+                          * float(np.std(forecast_field)) * (1.0 - prediction * processing) + 0.012)
             current_obs = current_field[cand] + rng.normal(0.0, obs_sigma[:, None], size=cand.shape)
             future_obs = forecast_field[cand] + rng.normal(0.0, pred_sigma[:, None], size=cand.shape)
             future_weight = config.planning_horizon_weight * planning * prediction
@@ -456,7 +463,10 @@ def run_one(
             + 0.22 * (spatial_opportunity + temporal_opportunity) * traits[:, 5]
         )
         behaviour_multiplier = 1.0 + behaviour_gain
-        capacity = collector_area * tech_multiplier * coop_multiplier * infra_multiplier * behaviour_multiplier
+        # Confirmatory intervention: no direct cognitive/behavioural harvesting bonus.
+        # Cognitive traits affect resource access only through information and movement
+        # decisions above (and their associated energetic costs), not through capacity.
+        capacity = collector_area * tech_multiplier * coop_multiplier * infra_multiplier
         capacity = np.clip(capacity, 0.02, 8.0)
         capacity_by_patch = np.bincount(locations, weights=capacity, minlength=n_cells)
         area_by_patch = np.bincount(locations, weights=collector_area, minlength=n_cells)
