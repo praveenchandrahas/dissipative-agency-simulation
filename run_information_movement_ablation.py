@@ -86,7 +86,10 @@ def pad_extinct_run(frame: pd.DataFrame, scenario_key: str, replicate: int, end_
     return pd.concat([frame, pd.DataFrame(rows)], ignore_index=True)
 
 def late_window_means(data: pd.DataFrame) -> pd.DataFrame:
-    subset = data[data.generation >= LATE_START]
+    # For short CI smoke runs, use the available horizon rather than an empty
+    # generation >= 200 selection. Full experiments still use generations 200-220.
+    window_start = min(LATE_START, max(0, GENERATIONS - 20))
+    subset = data[data.generation >= window_start]
     group = ["stage","environment_label","noise_level","treatment","replicate"]
     metrics = [m for m in METRICS if m in subset.columns]
     late = subset.groupby(group, as_index=False)[metrics].mean()
