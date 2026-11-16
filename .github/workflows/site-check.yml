@@ -2,7 +2,7 @@ name: Static research-site checks
 on:
   push:
     branches: [site/hypothesis-playground]
-    paths: ["docs/**", ".github/workflows/site-check.yml"]
+    paths: ["docs/**", ".github/workflows/site-check.yml", ".github/workflows/pages.yml"]
   pull_request:
     branches: [main]
     paths: ["docs/**", ".github/workflows/site-check.yml"]
