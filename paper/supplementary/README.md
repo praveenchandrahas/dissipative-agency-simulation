@@ -23,10 +23,10 @@ The archive contains:
 - Exact recorded v0.2 simulation and sensitivity source snapshots, plus requirements.
 - GitHub Actions CI validation record.
 
-The original v0.2 PNG plots are available separately in ../figures/. The five figures used in the manuscript are also included in ../arxiv-source.zip.
+The original v0.2 PNG plots are stored separately in the sibling repository directory ../figures/. The five publication figures are included in ../arxiv-source.zip.
 
 The SHA-256 of the reconstructed archive is:
 
-52bf2a5c23197fa312da2ce2b9da723f185275a230511bd7939b85672443cecb
+e5b289037a90d7243c6f2ade081bcc58ff508da2b358b7e06fec6f7d59ee5901
 
 No full parameter sweep has been executed yet. The five-case/two-scenario/two-generation parameter sweep in CI is only a software smoke test.
