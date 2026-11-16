@@ -444,6 +444,9 @@ def run_one(
         # - random: move with the same mobility process, but choose a random neighbour
         # - stationary: no adult movement
         action = traits[:, TRAIT_INDEX["action"]] if len(traits) else np.array([], dtype=float)
+        move = np.zeros(len(locations), dtype=bool)
+        move_opportunity = np.zeros(len(locations), dtype=bool)
+        movement_gain = np.zeros(len(locations), dtype=float)
         if len(traits) and mobility_mode != "stationary":
             all_candidates = neighbours[locations]
             # In Stage 1 (fixed_move_probability supplied), remove the current
@@ -453,12 +456,12 @@ def run_one(
                 cand = all_candidates[:, [0,1,2,3,5,6,7,8]]
             else:
                 cand = all_candidates
+            current_field = flux_now * (1.0 - base_albedo)
             if mobility_mode == "directed":
                 sensing = traits[:, TRAIT_INDEX["sensing"]]
                 processing = traits[:, TRAIT_INDEX["processing"]]
                 prediction = traits[:, TRAIT_INDEX["prediction"]]
                 planning = traits[:, TRAIT_INDEX["planning"]]
-                current_field = flux_now * (1.0 - base_albedo)
                 forecast_field = flux_forecast * (1.0 - base_albedo)
                 obs_sigma = (
                     config.signal_noise_multiplier * config.sensing_noise
@@ -484,10 +487,15 @@ def run_one(
                 if fixed_move_probability is not None
                 else np.clip(config.baseline_move_probability + 0.92 * action, 0.0, 0.95)
             )
-            move = move_gate_rng.random(len(locations)) < move_probability
-            locations = np.where(move, proposed, locations)
-        else:
-            move = np.zeros(len(locations), dtype=bool)
+            move_opportunity = move_gate_rng.random(len(locations)) < move_probability
+            # Ground-truth difference in local absorbed irradiance at the proposed
+            # destination. This audits decision quality independently of capture.
+            movement_gain[move_opportunity] = (
+                current_field[proposed[move_opportunity]]
+                - current_field[start_locations[move_opportunity]]
+            )
+            locations = np.where(move_opportunity, proposed, locations)
+            move = locations != start_locations
 
         if len(traits) == 0:
             break
@@ -662,6 +670,10 @@ def run_one(
             "information_enabled": int(information_enabled),
             "mobility_trait_enabled": int(mobility_trait_enabled),
             "adult_move_fraction": moved_fraction,
+            "adult_move_opportunity_fraction": float(np.mean(move_opportunity)) if len(move_opportunity) else 0.0,
+            "mean_movement_field_gain_W_m2": (
+                float(np.mean(movement_gain[move_opportunity])) if np.any(move_opportunity) else 0.0
+            ),
             "mean_cooperation": float(np.mean(traits[:, 6])),
             "mean_technology": float(np.mean(traits[:, 7])),
             "mean_infrastructure": float(np.mean(infrastructure)),
