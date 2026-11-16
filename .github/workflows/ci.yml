@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, experiment/information-movement-ablation]
+    branches: [main, experiment/information-movement-ablation, experiment/navigation-policy-ablation]
   pull_request:
     branches: [main]
 
@@ -44,6 +44,7 @@ jobs:
           python -m py_compile entropy_agency_v0_2_albedo_sensitivity.py
           python -m py_compile run_parameter_sweep.py
           python -m py_compile run_information_movement_ablation.py
+          python -m py_compile run_navigation_policy_ablation.py
 
       - name: Run information-movement ablation smoke test
         run: |
@@ -72,6 +73,43 @@ jobs:
           assert not effects.empty
           assert len(late) == 2 * 2 * 3 * 4 * 1
           print("Validated fixed-population controls, matched movement rates, and evolutionary treatments.")
+          PY
+
+      - name: Run navigation-policy ablation smoke test
+        run: |
+          python run_navigation_policy_ablation.py \
+            --smoke \
+            --output-dir ci-navigation-policy-smoke
+
+      - name: Validate navigation-policy controls
+        run: |
+          python - <<'PY'
+          import numpy as np
+          import pandas as pd
+          from pathlib import Path
+
+          out = Path("ci-navigation-policy-smoke")
+          ts = pd.read_csv(out / "timeseries.csv")
+          late = pd.read_csv(out / "replicate_late_window.csv")
+          effects = pd.read_csv(out / "paired_effects.csv")
+          expected = {"irradiance_only", "density_aware", "expected_payoff", "random"}
+          assert set(ts["treatment"]) == expected
+          assert set(ts["stage"]) == {"fixed_mechanism", "evolutionary"}
+          fixed = late[late.stage == "fixed_mechanism"]
+          for metric in ["mean_mobility_fraction", "adult_move_opportunity_fraction"]:
+              z = fixed.pivot(index=["environment_label", "noise_level", "replicate"],
+                              columns="treatment", values=metric)
+              for policy in expected:
+                  assert np.allclose(z["irradiance_only"], z[policy], atol=1e-12, rtol=0), (metric, policy)
+          assert len(late) == 2 * 2 * 3 * 4 * 1
+          assert not effects.empty
+          assert set(effects["contrast"]).issuperset({
+              "density_aware - irradiance_only",
+              "expected_payoff - density_aware",
+              "expected_payoff - irradiance_only",
+              "irradiance_only - random",
+          })
+          print("Validated all four policies and exact Stage-1 movement matching.")
           PY
 
       - name: Run six-scenario smoke test
