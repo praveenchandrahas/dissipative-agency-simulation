@@ -298,12 +298,17 @@ def radiative_entropy_production(
     }
 
 
-def initialize_population(rng: np.random.Generator, config: Config, world: dict[str, Any], cognition: bool) -> tuple[np.ndarray, np.ndarray]:
+def initialize_population(
+    rng: np.random.Generator, config: Config, world: dict[str, Any],
+    information_enabled: bool, mobility_trait_enabled: bool,
+) -> tuple[np.ndarray, np.ndarray]:
     n = config.initial_population
     means = np.array([0.22, 0.08, 0.07, 0.06, 0.05, 0.08, 0.08, 0.015], dtype=float)
     traits = np.clip(rng.normal(means, 0.045, size=(n, len(TRAIT_NAMES))), 0.0, 1.0)
-    if not cognition:
-        traits[:, 1:6] = 0.0
+    if not information_enabled:
+        traits[:, 1:5] = 0.0
+    if not mobility_trait_enabled:
+        traits[:, 5] = 0.0
     loc = rng.integers(0, world["cells"], size=n, dtype=np.int32)
     return traits, loc
 
@@ -312,7 +317,8 @@ def mutate_offspring(
     parent_traits: np.ndarray,
     rng: np.random.Generator,
     config: Config,
-    cognition: bool,
+    information_enabled: bool,
+    mobility_trait_enabled: bool,
 ) -> np.ndarray:
     if parent_traits.size == 0:
         return parent_traits.copy()
@@ -326,8 +332,10 @@ def mutate_offspring(
             0.0,
             1.0,
         )
-    if not cognition:
-        child[:, 1:6] = 0.0
+    if not information_enabled:
+        child[:, 1:5] = 0.0
+    if not mobility_trait_enabled:
+        child[:, 5] = 0.0
     return child
 
 
@@ -350,9 +358,25 @@ def run_one(
     config: Config,
     world: dict[str, Any],
     keep_snapshot: bool = False,
+    information_enabled: bool | None = None,
+    mobility_mode: str | None = None,
+    mobility_trait_enabled: bool | None = None,
+    fixed_move_probability: float | None = None,
+    evolutionary: bool = True,
+    initial_traits: np.ndarray | None = None,
+    initial_locations: np.ndarray | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     scenario = SCENARIOS[scenario_key]
     cognition = bool(scenario["cognition_enabled"])
+    information_enabled = cognition if information_enabled is None else bool(information_enabled)
+    mobility_mode = ("directed" if cognition else "random") if mobility_mode is None else mobility_mode
+    mobility_trait_enabled = cognition if mobility_trait_enabled is None else bool(mobility_trait_enabled)
+    if mobility_mode not in {"directed", "random", "stationary"}:
+        raise ValueError("mobility_mode must be directed, random, or stationary")
+    if mobility_mode == "directed" and not information_enabled:
+        raise ValueError("directed mobility requires information_enabled=True")
+    if fixed_move_probability is not None and not (0.0 <= fixed_move_probability <= 1.0):
+        raise ValueError("fixed_move_probability must be between zero and one")
     scenario_index = list(SCENARIOS).index(scenario_key)
     paired_environment_group = {
         "weakly_variable": 0,
@@ -365,10 +389,28 @@ def run_one(
     # Separate random streams ensure that a cognition-enabled run and its
     # disabled control receive the same weather/irradiance history.
     env_rng = np.random.default_rng(config.seed + 100_003 * replicate + 7_919 * paired_environment_group)
-    # Matched cognitive/no-cognition treatments share the same initial population
-    # draw and stochastic stream; only the cognition constraint differs.
-    rng = np.random.default_rng(config.seed + 100_003 * replicate + 1_009 * paired_environment_group)
-    traits, locations = initialize_population(rng, config, world, cognition)
+    # Matched treatments share initial-state and random-stream seeds within an
+    # environment/replicate. Separate movement gates ensure fixed-population
+    # informed and random movers receive exactly the same movement opportunities.
+    run_seed = config.seed + 100_003 * replicate + 1_009 * paired_environment_group
+    rng = np.random.default_rng(run_seed)
+    move_gate_rng = np.random.default_rng(run_seed + 41_003)
+    destination_rng = np.random.default_rng(run_seed + 73_007)
+    if initial_traits is None and initial_locations is None:
+        traits, locations = initialize_population(
+            rng, config, world, information_enabled, mobility_trait_enabled
+        )
+    elif initial_traits is not None and initial_locations is not None:
+        traits = np.asarray(initial_traits, dtype=float).copy()
+        locations = np.asarray(initial_locations, dtype=np.int32).copy()
+        if traits.shape != (len(locations), len(TRAIT_NAMES)):
+            raise ValueError("initial_traits and initial_locations have incompatible shapes")
+        if not information_enabled:
+            traits[:, 1:5] = 0.0
+        if not mobility_trait_enabled:
+            traits[:, 5] = 0.0
+    else:
+        raise ValueError("initial_traits and initial_locations must be supplied together")
     n_cells = world["cells"]
     base_albedo = world["base_albedo"]
     neighbours = world["neighbours"]
@@ -396,40 +438,47 @@ def run_one(
         forecast_weather = scenario["weather_persistence"] * weather
         flux_forecast = seasonal_irradiance(generation + 1, forecast_weather, scenario, world, config.stellar_flux_multiplier)
 
-        # Behavioural choice: evaluate the current patch and its eight neighbours.
-        # Sensing improves current observations; processing extracts useful signals;
-        # prediction improves forecasts; planning weights the forecast; action executes movement.
-        if cognition and len(traits):
-            cand = neighbours[locations]  # (n_agents, 9)
-            sensing = traits[:, TRAIT_INDEX["sensing"]]
-            processing = traits[:, TRAIT_INDEX["processing"]]
-            prediction = traits[:, TRAIT_INDEX["prediction"]]
-            planning = traits[:, TRAIT_INDEX["planning"]]
-            action = traits[:, TRAIT_INDEX["action"]]
-            current_field = flux_now * (1.0 - base_albedo)
-            forecast_field = flux_forecast * (1.0 - base_albedo)
-            # Noise is expressed relative to the spatial signal scale. This avoids
-            # effectively perfect sensing caused by sub-W/m^2 absolute noise.
-            obs_sigma = (config.signal_noise_multiplier * config.sensing_noise
-                         * float(np.std(current_field)) * (1.0 - sensing * processing) + 0.012)
-            pred_sigma = (config.signal_noise_multiplier * config.prediction_noise
-                          * float(np.std(forecast_field)) * (1.0 - prediction * processing) + 0.012)
-            current_obs = current_field[cand] + rng.normal(0.0, obs_sigma[:, None], size=cand.shape)
-            future_obs = forecast_field[cand] + rng.normal(0.0, pred_sigma[:, None], size=cand.shape)
-            future_weight = config.planning_horizon_weight * planning * prediction
-            scores = (1.0 - future_weight[:, None]) * current_obs + future_weight[:, None] * future_obs
-            best = np.argmax(scores, axis=1)
-            proposed = cand[np.arange(len(locations)), best]
-            move_probability = np.clip(config.baseline_move_probability + 0.92 * action, 0.0, 0.95)
-            move = rng.random(len(locations)) < move_probability
+        # Adult mobility is separated from information use:
+        # - directed: choose a destination from noisy observations/forecasts
+        # - random: move with the same mobility process, but choose a random neighbour
+        # - stationary: no adult movement
+        action = traits[:, TRAIT_INDEX["action"]] if len(traits) else np.array([], dtype=float)
+        if len(traits) and mobility_mode != "stationary":
+            cand = neighbours[locations]
+            if mobility_mode == "directed":
+                sensing = traits[:, TRAIT_INDEX["sensing"]]
+                processing = traits[:, TRAIT_INDEX["processing"]]
+                prediction = traits[:, TRAIT_INDEX["prediction"]]
+                planning = traits[:, TRAIT_INDEX["planning"]]
+                current_field = flux_now * (1.0 - base_albedo)
+                forecast_field = flux_forecast * (1.0 - base_albedo)
+                obs_sigma = (
+                    config.signal_noise_multiplier * config.sensing_noise
+                    * float(np.std(current_field)) * (1.0 - sensing * processing) + 0.012
+                )
+                pred_sigma = (
+                    config.signal_noise_multiplier * config.prediction_noise
+                    * float(np.std(forecast_field)) * (1.0 - prediction * processing) + 0.012
+                )
+                current_obs = current_field[cand] + rng.normal(0.0, obs_sigma[:, None], size=cand.shape)
+                future_obs = forecast_field[cand] + rng.normal(0.0, pred_sigma[:, None], size=cand.shape)
+                future_weight = config.planning_horizon_weight * planning * prediction
+                scores = (1.0 - future_weight[:, None]) * current_obs + future_weight[:, None] * future_obs
+                best = np.argmax(scores, axis=1)
+                proposed = cand[np.arange(len(locations)), best]
+            else:
+                choices = destination_rng.integers(0, 9, size=len(locations))
+                proposed = cand[np.arange(len(locations)), choices]
+
+            move_probability = (
+                float(fixed_move_probability)
+                if fixed_move_probability is not None
+                else np.clip(config.baseline_move_probability + 0.92 * action, 0.0, 0.95)
+            )
+            move = move_gate_rng.random(len(locations)) < move_probability
             locations = np.where(move, proposed, locations)
         else:
-            # Non-cognitive structures do not sense, predict, plan, or deliberately move.
-            # A small baseline dispersal keeps the spatial population from being frozen.
-            move = rng.random(len(locations)) < config.baseline_move_probability
-            if np.any(move):
-                choices = rng.integers(0, 9, size=int(np.sum(move)))
-                locations[move] = neighbours[locations[move], choices]
+            move = np.zeros(len(locations), dtype=bool)
 
         if len(traits) == 0:
             break
@@ -509,7 +558,7 @@ def run_one(
         # Separate metabolic and capability-specific maintenance costs.
         costs = np.asarray(config.trait_costs, dtype=float)
         maintenance = config.baseline_metabolic_cost + np.sum((traits**2) * costs[None, :], axis=1)
-        maintenance += 0.012 * np.maximum(0.0, action if cognition else 0.0)  # movement wear
+        maintenance += 0.012 * np.maximum(0.0, action if mobility_trait_enabled else 0.0)  # mobility wear
         net_energy = gross_energy - maintenance
 
         # Shared infrastructure is built from a fraction of local net surplus.
@@ -545,7 +594,7 @@ def run_one(
         bio_power = total_harvested_units * config.resource_unit_joules / config.generation_seconds
         potential_bio_power = float(np.sum(resource_units)) * config.resource_unit_joules / config.generation_seconds
         moved_fraction = float(np.mean(locations != start_locations)) if generation > 0 else 0.0
-        cognitive_mean = float(np.mean(np.mean(traits[:, 1:6], axis=1))) if cognition else 0.0
+        cognitive_mean = float(np.mean(np.mean(traits[:, 1:6], axis=1))) if (information_enabled or mobility_trait_enabled) else 0.0
         gross_sorted = np.sort(np.maximum(gross_energy, 0.0))
         top_n = max(1, int(math.ceil(0.10 * len(gross_sorted))))
         top10_energy_share = float(np.sum(gross_sorted[-top_n:]) / max(np.sum(gross_sorted), 1e-12))
@@ -598,8 +647,12 @@ def run_one(
             "mean_processing": float(np.mean(traits[:, 2])),
             "mean_prediction": float(np.mean(traits[:, 3])),
             "mean_planning": float(np.mean(traits[:, 4])),
+            "mean_information_composite": float(np.mean(traits[:, 1:5])),
             "mean_action": float(np.mean(traits[:, 5])),
             "mean_agency_composite": cognitive_mean,
+            "information_enabled": int(information_enabled),
+            "mobility_trait_enabled": int(mobility_trait_enabled),
+            "adult_move_fraction": moved_fraction,
             "mean_cooperation": float(np.mean(traits[:, 6])),
             "mean_technology": float(np.mean(traits[:, 7])),
             "mean_infrastructure": float(np.mean(infrastructure)),
@@ -621,6 +674,8 @@ def run_one(
 
         if generation == config.generations:
             break
+        if not evolutionary:
+            continue
 
         # Reproduction: surviving adults plus offspring carrying mutated traits.
         survivor_traits = traits[survived_mask]
@@ -633,7 +688,9 @@ def run_one(
             parent_weights = np.exp(np.clip(log_weights, -40.0, 0.0))
             parent_weights /= np.sum(parent_weights)
             parent_ids = rng.choice(len(traits), size=n_births, replace=True, p=parent_weights)
-            child_traits = mutate_offspring(traits[parent_ids], rng, config, cognition)
+            child_traits = mutate_offspring(
+                traits[parent_ids], rng, config, information_enabled, mobility_trait_enabled
+            )
             child_locations = locations[parent_ids].copy()
             disperse_prob = np.clip(
                 config.dispersal_base
