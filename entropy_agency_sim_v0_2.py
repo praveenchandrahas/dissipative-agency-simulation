@@ -491,7 +491,7 @@ def run_one(
                     )
                     perceived_count = np.maximum(
                         0.0,
-                        local_count_grid[cand]
+                        local_count_grid[cand] + 1.0
                         + decision_rng.normal(0.0, density_sigma[:, None], size=cand.shape),
                     )
                     density_scale = max(float(np.mean(local_count_grid)), 1.0)
