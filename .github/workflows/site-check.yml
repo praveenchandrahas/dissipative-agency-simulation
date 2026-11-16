@@ -1,0 +1,30 @@
+name: Static research-site checks
+on:
+  push:
+    branches: [site/hypothesis-playground]
+    paths: ["docs/**", ".github/workflows/site-check.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["docs/**", ".github/workflows/site-check.yml"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check playground JavaScript syntax
+        run: node --check docs/playground.js
+      - name: Check required site files and navigation
+        run: |
+          test -s docs/index.html
+          test -s docs/blog.html
+          test -s docs/playground.js
+          grep -q 'src="playground.js"' docs/index.html
+          grep -q 'href="blog.html"' docs/index.html
+          grep -q 'id="run"' docs/index.html
+          grep -q 'id="info"' docs/index.html
+          echo "Required site files and controls are present."
