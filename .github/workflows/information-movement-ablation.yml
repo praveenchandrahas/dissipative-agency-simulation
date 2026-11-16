@@ -1,14 +1,11 @@
 name: Information versus movement ablation
 on:
-  push:
-    branches: [experiment/information-movement-ablation]
-    paths:
-      - "entropy_agency_sim_v0_2.py"
-      - "run_information_movement_ablation.py"
-      - ".github/workflows/information-movement-ablation.yml"
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: information-movement-ablation
+  cancel-in-progress: true
 jobs:
   run-ablation:
     runs-on: ubuntu-latest
