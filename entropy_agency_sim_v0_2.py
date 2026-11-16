@@ -445,7 +445,14 @@ def run_one(
         # - stationary: no adult movement
         action = traits[:, TRAIT_INDEX["action"]] if len(traits) else np.array([], dtype=float)
         if len(traits) and mobility_mode != "stationary":
-            cand = neighbours[locations]
+            all_candidates = neighbours[locations]
+            # In Stage 1 (fixed_move_probability supplied), remove the current
+            # patch so every movement gate produces an actual move in both
+            # informed and random treatments. Stage 2 retains the stay option.
+            if fixed_move_probability is not None:
+                cand = all_candidates[:, [0,1,2,3,5,6,7,8]]
+            else:
+                cand = all_candidates
             if mobility_mode == "directed":
                 sensing = traits[:, TRAIT_INDEX["sensing"]]
                 processing = traits[:, TRAIT_INDEX["processing"]]
@@ -468,7 +475,8 @@ def run_one(
                 best = np.argmax(scores, axis=1)
                 proposed = cand[np.arange(len(locations)), best]
             else:
-                choices = destination_rng.integers(0, 9, size=len(locations))
+                choice_count = cand.shape[1]
+                choices = destination_rng.integers(0, choice_count, size=len(locations))
                 proposed = cand[np.arange(len(locations)), choices]
 
             move_probability = (
