@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    name: Compile and run a small simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MPLBACKEND: Agg
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile simulation scripts
+        run: |
+          python -m py_compile entropy_agency_sim_v0_2.py
+          python -m py_compile entropy_agency_v0_2_albedo_sensitivity.py
+
+      - name: Run six-scenario smoke test
+        run: |
+          python entropy_agency_sim_v0_2.py \
+            --generations 2 \
+            --replicates 1 \
+            --seed 123 \
+            --output-dir ci-smoke-output
+
+      - name: Validate smoke-test outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+
+          out = Path("ci-smoke-output")
+          timeseries = pd.read_csv(out / "entropy_agency_v0_2_timeseries.csv")
+          summary = pd.read_csv(out / "entropy_agency_v0_2_final_summary.csv")
+          ablation = pd.read_csv(out / "entropy_agency_v0_2_cognitive_ablation.csv")
+          metadata = json.loads((out / "entropy_agency_v0_2_metadata.json").read_text())
+
+          assert len(timeseries) > 0, "Time series is empty"
+          assert summary["scenario_key"].nunique() == 6, "Expected all six scenarios"
+          assert len(summary) == 6, "Expected one summary row per scenario"
+          assert len(ablation) == 2, "Expected two paired cognitive-ablation rows"
+          assert metadata["version"] == "0.2", "Unexpected model version"
+
+          numeric_columns = [
+              "population",
+              "biotic_power_harnessed_TW",
+              "biotic_power_per_entity_GW",
+              "delta_radiative_entropy_percent",
+          ]
+          for column in numeric_columns:
+              assert np.isfinite(timeseries[column]).all(), f"Non-finite values in {column}"
+
+          print(f"Validated {len(timeseries)} time-series rows across six scenarios.")
+          print("Summary rows:", len(summary))
+          print("Cognitive ablation rows:", len(ablation))
+          PY
