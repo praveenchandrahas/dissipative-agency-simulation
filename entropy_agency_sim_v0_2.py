@@ -107,6 +107,7 @@ class Config:
     # Radiative / resource assumptions
     base_albedo_mean: float = 0.30
     albedo_spatial_sd: float = 0.055
+    stellar_flux_multiplier: float = 1.0
     baseline_resource_efficiency: float = PHOTO_CHEMICAL_EFFICIENCY
     generation_seconds: float = YEAR_S
     resource_unit_joules: float = JOULES_PER_MODEL_UNIT
@@ -237,8 +238,9 @@ def seasonal_irradiance(
     weather: np.ndarray,
     scenario: dict[str, Any],
     world: dict[str, Any],
+    stellar_flux_multiplier: float = 1.0,
 ) -> np.ndarray:
-    """Create local top-of-atmosphere irradiance, normalized to fixed global input."""
+    """Create local TOA irradiance with a configurable global stellar-flux multiplier."""
     lat = world["lat"]
     lon = world["lon"]
     phase = 2.0 * np.pi * generation / 36.0
@@ -250,12 +252,17 @@ def seasonal_irradiance(
     )
     raw = lat_shift * longitude_pattern * np.exp(weather)
     raw = np.maximum(raw, 1e-6)
-    # Keep total stellar input constant; only its spatial distribution changes.
-    raw *= MEAN_TOA_W_M2 / float(np.mean(raw))
+    # Normalize spatial distribution, then scale the total stellar energy supply.
+    if stellar_flux_multiplier <= 0:
+        raise ValueError("stellar_flux_multiplier must be positive")
+    raw *= (MEAN_TOA_W_M2 * stellar_flux_multiplier) / float(np.mean(raw))
     return raw.ravel()
 
 
-def radiative_entropy_production(global_albedo: float) -> dict[str, float]:
+def radiative_entropy_production(
+    global_albedo: float,
+    stellar_flux_multiplier: float = 1.0,
+) -> dict[str, float]:
     """Global-mean, blackbody radiative entropy balance at steady state.
 
     Uses the common planetary approximation: uniform day/night redistribution,
@@ -264,11 +271,14 @@ def radiative_entropy_production(global_albedo: float) -> dict[str, float]:
     transport, clouds, spectral windows, and internal heat flows.
     """
     A = float(np.clip(global_albedo, 0.0, 0.95))
-    absorbed_flux = (1.0 - A) * SOLAR_CONSTANT_W_M2 / 4.0
+    if stellar_flux_multiplier <= 0:
+        raise ValueError("stellar_flux_multiplier must be positive")
+    absorbed_flux = (1.0 - A) * SOLAR_CONSTANT_W_M2 * stellar_flux_multiplier / 4.0
     t_eq = (absorbed_flux / SIGMA) ** 0.25
     incoming_entropy_flux = (
         0.25
         * (1.0 - A)
+        * stellar_flux_multiplier
         * (SUN_RADIUS_M / ORBIT_M) ** 2
         * (4.0 / 3.0)
         * SIGMA
@@ -378,10 +388,10 @@ def run_one(
         weather_next = scenario["weather_persistence"] * weather + math.sqrt(
             max(0.0, 1.0 - scenario["weather_persistence"] ** 2)
         ) * next_fresh
-        flux_now = seasonal_irradiance(generation, weather, scenario, world)
-        flux_next = seasonal_irradiance(generation + 1, weather_next, scenario, world)
+        flux_now = seasonal_irradiance(generation, weather, scenario, world, config.stellar_flux_multiplier)
+        flux_next = seasonal_irradiance(generation + 1, weather_next, scenario, world, config.stellar_flux_multiplier)
         forecast_weather = scenario["weather_persistence"] * weather
-        flux_forecast = seasonal_irradiance(generation + 1, forecast_weather, scenario, world)
+        flux_forecast = seasonal_irradiance(generation + 1, forecast_weather, scenario, world, config.stellar_flux_multiplier)
 
         # Behavioural choice: evaluate the current patch and its eight neighbours.
         # Sensing improves current observations; processing extracts useful signals;
@@ -516,8 +526,12 @@ def run_one(
         n_births = int(rng.poisson(len(traits) * birth_rate_per_entity))
 
         # Store metrics before replacing the population.
-        rad_biotic = radiative_entropy_production(float(np.average(albedo, weights=flux_now)))
-        rad_abiotic = radiative_entropy_production(float(np.average(albedo_abiotic, weights=flux_now)))
+        rad_biotic = radiative_entropy_production(
+            float(np.average(albedo, weights=flux_now)), config.stellar_flux_multiplier
+        )
+        rad_abiotic = radiative_entropy_production(
+            float(np.average(albedo_abiotic, weights=flux_now)), config.stellar_flux_multiplier
+        )
         bio_power = total_harvested_units * config.resource_unit_joules / config.generation_seconds
         potential_bio_power = float(np.sum(resource_units)) * config.resource_unit_joules / config.generation_seconds
         moved_fraction = float(np.mean(locations != start_locations)) if generation > 0 else 0.0
