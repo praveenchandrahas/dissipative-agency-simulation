@@ -1,0 +1,179 @@
+name: Parameter sweep
+
+run-name: "Parameter sweep: ${{ inputs.design }} — ${{ inputs.factors }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      design:
+        description: "Screening estimates main effects; factorial explores interactions"
+        required: true
+        default: screening
+        type: choice
+        options:
+          - screening
+          - factorial
+      factors:
+        description: "Comma-separated factors, or 'all'. Factorial is limited to four."
+        required: true
+        default: all
+        type: string
+      scenarios:
+        description: "Use all six scenarios or only the matched cognition pair"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - cognition_pair
+      generations:
+        description: "Generations per run (1–500)"
+        required: true
+        default: 100
+        type: number
+      replicates:
+        description: "Replicates per case and scenario (1–8)"
+        required: true
+        default: 2
+        type: number
+      seed:
+        description: "Base random seed; reused across cases for matched comparisons"
+        required: true
+        default: 20261116
+        type: number
+      max_cases:
+        description: "Maximum number of parameter cases to permit (1–81)"
+        required: true
+        default: 25
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parameter-sweep-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Run reproducible parameter sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      MPLBACKEND: Agg
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate sweep bounds
+        env:
+          DESIGN: ${{ inputs.design }}
+          FACTORS: ${{ inputs.factors }}
+          GENERATIONS: ${{ inputs.generations }}
+          REPLICATES: ${{ inputs.replicates }}
+          SEED: ${{ inputs.seed }}
+          MAX_CASES: ${{ inputs.max_cases }}
+          SCENARIOS: ${{ inputs.scenarios }}
+        run: |
+          python - <<'PY'
+          import os
+          from run_parameter_sweep import parse_factors, make_cases
+
+          design = os.environ["DESIGN"]
+          factors = parse_factors(os.environ["FACTORS"])
+          cases = make_cases(design, factors)
+          generations = int(os.environ["GENERATIONS"])
+          replicates = int(os.environ["REPLICATES"])
+          seed = int(os.environ["SEED"])
+          max_cases = int(os.environ["MAX_CASES"])
+          scenario_count = 6 if os.environ["SCENARIOS"] == "all" else 2
+
+          if not 1 <= generations <= 500:
+              raise SystemExit("generations must be between 1 and 500")
+          if not 1 <= replicates <= 8:
+              raise SystemExit("replicates must be between 1 and 8")
+          if not 0 <= seed <= 2147483647:
+              raise SystemExit("seed must be between 0 and 2147483647")
+          if not 1 <= max_cases <= 81 or len(cases) > max_cases:
+              raise SystemExit(f"design creates {len(cases)} cases, max_cases is {max_cases}")
+          run_count = len(cases) * scenario_count * replicates
+          if run_count > 1500:
+              raise SystemExit(f"design creates {run_count} runs; limit is 1500")
+          print(f"Accepted: {len(cases)} cases × {scenario_count} scenarios × {replicates} replicates = {run_count} runs")
+          PY
+
+      - name: Execute parameter sweep
+        env:
+          DESIGN: ${{ inputs.design }}
+          FACTORS: ${{ inputs.factors }}
+          SCENARIOS: ${{ inputs.scenarios }}
+          GENERATIONS: ${{ inputs.generations }}
+          REPLICATES: ${{ inputs.replicates }}
+          SEED: ${{ inputs.seed }}
+          MAX_CASES: ${{ inputs.max_cases }}
+        run: |
+          python run_parameter_sweep.py \
+            --design "$DESIGN" \
+            --factors "$FACTORS" \
+            --scenarios "$SCENARIOS" \
+            --generations "$GENERATIONS" \
+            --replicates "$REPLICATES" \
+            --seed "$SEED" \
+            --max-cases "$MAX_CASES" \
+            --max-runs 1500 \
+            --output-dir artifacts/parameter-sweep
+
+      - name: Add sweep summary to workflow page
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          from pathlib import Path
+          import pandas as pd
+
+          print("# Parameter sweep")
+          path = Path("artifacts/parameter-sweep/sweep_summary.csv")
+          if not path.exists():
+              print("\nSweep summary was not produced.")
+              raise SystemExit(0)
+          frame = pd.read_csv(path)
+          columns = [
+              "case_label", "scenario",
+              "population_mean", "mean_agency_composite_mean",
+              "biotic_power_harnessed_TW_mean",
+              "delta_radiative_entropy_percent_mean",
+          ]
+          columns = [column for column in columns if column in frame.columns]
+          print("\nThe complete tables and plots are in the downloadable artifact.")
+          print("\n| " + " | ".join(columns) + " |")
+          print("|" + "|".join(["---"] * len(columns)) + "|")
+          for _, row in frame[columns].head(60).iterrows():
+              vals = []
+              for column in columns:
+                  value = row[column]
+                  vals.append(f"{value:.4g}" if isinstance(value, (int, float)) else str(value))
+              print("| " + " | ".join(vals) + " |")
+          PY
+
+      - name: Upload sweep outputs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: dissipative-agency-parameter-sweep-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: artifacts/parameter-sweep/
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 6
