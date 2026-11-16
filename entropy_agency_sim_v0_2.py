@@ -396,6 +396,7 @@ def run_one(
     rng = np.random.default_rng(run_seed)
     move_gate_rng = np.random.default_rng(run_seed + 41_003)
     destination_rng = np.random.default_rng(run_seed + 73_007)
+    decision_rng = np.random.default_rng(run_seed + 97_003)
     if initial_traits is None and initial_locations is None:
         traits, locations = initialize_population(
             rng, config, world, information_enabled, mobility_trait_enabled
@@ -460,8 +461,8 @@ def run_one(
                     config.signal_noise_multiplier * config.prediction_noise
                     * float(np.std(forecast_field)) * (1.0 - prediction * processing) + 0.012
                 )
-                current_obs = current_field[cand] + rng.normal(0.0, obs_sigma[:, None], size=cand.shape)
-                future_obs = forecast_field[cand] + rng.normal(0.0, pred_sigma[:, None], size=cand.shape)
+                current_obs = current_field[cand] + decision_rng.normal(0.0, obs_sigma[:, None], size=cand.shape)
+                future_obs = forecast_field[cand] + decision_rng.normal(0.0, pred_sigma[:, None], size=cand.shape)
                 future_weight = config.planning_horizon_weight * planning * prediction
                 scores = (1.0 - future_weight[:, None]) * current_obs + future_weight[:, None] * future_obs
                 best = np.argmax(scores, axis=1)
