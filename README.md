@@ -119,3 +119,8 @@ Limits protect hosted-runner capacity: 1–500 generations, 1–8 replicates, at
 ## License
 
 See [LICENSE](LICENSE).
+
+
+## Research preprint
+
+The v0.2 research paper, LaTeX source, and full supplementary results are in [paper/](paper/). The PDF and arXiv source archive are available directly in that directory. The data archive is provided as four parts; see [paper/supplementary/README.md](paper/supplementary/README.md) to reconstruct it. The manuscript has been prepared for arXiv submission but has not yet been submitted.
