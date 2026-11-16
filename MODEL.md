@@ -13,7 +13,7 @@ This is a toy model for hypothesis exploration. It is not a validated model of E
 ## What is represented
 
 - A planet divided into 384 spatial patches (16 latitude bands × 24 longitude bands).
-- Spatially and temporally varying stellar energy input. The global mean incident stellar flux is normalized to remain constant; the distribution changes between patches.
+- Spatially and temporally varying stellar energy input. The global mean incident stellar flux is normalized within each scenario, then scaled by the configurable `stellar_flux_multiplier` (1.0 is the v0.2 reference). Parameter sweeps use this multiplier to vary total stellar energy supply while preserving the spatial pattern.
 - A population of coarse-grained ecological entities or lineages. An entity is not a cell, organism, species, or civilization in a one-to-one sense.
 - Eight heritable traits: collector, sensing, processing, prediction, planning, action, cooperation and technology.
 - Mutation, differential survival, reproduction and local dispersal.
