@@ -1,12 +1,6 @@
 name: Navigation policy ablation
 
 on:
-  push:
-    branches: [experiment/navigation-policy-ablation]
-    paths:
-      - "entropy_agency_sim_v0_2.py"
-      - "run_navigation_policy_ablation.py"
-      - ".github/workflows/navigation-policy-ablation.yml"
   workflow_dispatch:
 
 permissions:
