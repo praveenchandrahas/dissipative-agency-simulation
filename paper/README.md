@@ -1,8 +1,15 @@
 # Research preprint: Energy Capture, Agency, and Planetary Entropy
 
 **Author:** Praveen Chandrahas  
-**Version:** 1.1 preprint, revised 23 November 2026 (version 1.0: 16 November 2026)  
+**Version:** 1.2 preprint, revised 23 November 2026 (version 1.1 earlier the same day; version 1.0: 16 November 2026)  
 **Status:** prepared for arXiv submission; not yet submitted and no arXiv identifier assigned.
+
+## What changed in version 1.2
+
+- **Prior work credited.** The revised conjecture's components are not new, and the paper now says so in the Introduction. Added: Smith & Morowitz (2016), Branscomb, Biancalani, Goldenfeld & Russell (2017), Pascal, Pross & Sutherland (2013), Ulanowicz & Hannon (1987), Kussell & Leibler (2005).
+- **New prior-art paragraphs** (Section 2.5) on life as the relief of kinetically hindered disequilibria and on the thermodynamics of Darwinian selection: Kolchinsky (2025), Kolchinsky & Wolpert (2018), Ravasio et al. (2024), Jain & Krishna (1998), Rao & Esposito (2016), Sornette & Troude (2025), Michaelian (2011).
+- **Follow-ups and implications** (Sections 7 and 8.5) now say where that work bears on the results: mixing entropy is standard in open reaction-network thermodynamics, and its omission in the earlier pilot was ours; the 100-times mineral result bears on flux-amplification claims; the proposed drifting-lock test is informative only if it adds the thermodynamic side, since the qualitative answer is expected from fluctuating-environment theory.
+- No result, table or figure changed. Version 1.1 is kept as [archive/main-v1.1.pdf](archive/main-v1.1.pdf).
 
 ## What changed in version 1.1
 
@@ -15,7 +22,8 @@
 
 ## Main files
 
-- [main.pdf](main.pdf) — 16-page manuscript, version 1.1.
+- [main.pdf](main.pdf) — 17-page manuscript, version 1.2.
+- [archive/main-v1.1.pdf](archive/main-v1.1.pdf) — the 16-page version 1.1.
 - [archive/main-v1.0.pdf](archive/main-v1.0.pdf) — the 14-page version 1.0.
 - [arxiv-source.zip](arxiv-source.zip) — self-contained LaTeX source, bibliography, compiled BBL, and all five paper figures.
 - [figures/](figures/) — original v0.2 simulation plots (the publication figures are also inside the arXiv source archive).
