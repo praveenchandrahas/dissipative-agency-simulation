@@ -112,6 +112,29 @@ In v0.2, individual-level selection favours some cognitive capabilities because 
 
 The Universe does not appear in the model as an optimizer. The only optimizer is the local selection process encoded in the reproduction rule. Whether that local process leads to greater global dissipation depends on ecological coupling, competition, spatial coverage, external forcing, environmental feedback and the available strategies.
 
+## Follow-up analyses (reported in paper version 1.1)
+
+Run on 2026-11-16 in the companion repository [agency-from-gradients](https://github.com/praveenchandrahas/agency-from-gradients), `planet/` directory (branch [`planet-v02-followups`](https://github.com/praveenchandrahas/agency-from-gradients/tree/planet-v02-followups) at the time of writing), with the v0.2 source unchanged. Replicates 0–5 at generation 220 reproduce the table above. 20 replicates per cell, 660 generations, 95% bootstrap intervals. Predictions were written before the runs, after the results above had been seen.
+
+| | Generations 201–220 | Generations 641–660 |
+|---|---|---|
+| Carrier fraction from 50/50, strong | 1.000 [0.999, 1.000] | — |
+| Throughput, mixed strong world (TW) | 43.9 [36.0, 52.3] | 108.1 [106.4, 109.6] |
+| Throughput, non-carriers only, strong (TW) | 134.7 [134.4, 135.0] | 135.2 [135.1, 135.3] |
+| Agency minus neutral markers, strong | +0.057 [0.020, 0.093] | −0.012 [−0.048, 0.022] |
+| Agency minus neutral markers, weak | −0.032 [−0.050, −0.007] | −0.129 [−0.152, −0.099] |
+| Action trait, strong | 0.261 [0.213, 0.311] | 0.035 [0.033, 0.037] |
+
+What they change:
+
+- **The counterexample holds inside one world.** Carriers win the competition and the planet's throughput falls.
+- **Most of the rise in agency is drift.** Neutral markers rise as far, except in the strong environment at generation 220.
+- **Generation 220 is a low point.** The action trait falls to about 0.04 everywhere by generation 660, and throughput partly recovers.
+
+## The hypothesis, revised (23 November 2026)
+
+The conclusion above, that local advantage need not add up to global dissipation, still stands. Further experiments changed the rest. A locked-gradient test found that non-living structures also drain gradients that life drains; only the living structure improved. And five separate experiments found entropy production to be a consequence of persistence, not the thing selected. The revised conjecture: structures, living or not, persist when they drain a gradient well enough to meet their costs; what heredity with variation adds is improvement, which should pay most when the environment changes. The evidence, link by link, is in [where the hypothesis stands](https://github.com/praveenchandrahas/agency-from-gradients/blob/main/docs/standing.md).
+
 ## What should change in v0.3
 
 1. Replace the hand-written behavioural advantage with an explicit decision problem: agents must infer gradients from observations and choose actions under uncertainty. Compare evolved information-processing strategies with random, reactive and fixed-rule baselines.
